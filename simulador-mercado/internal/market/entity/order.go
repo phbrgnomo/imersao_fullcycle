@@ -15,7 +15,7 @@ type Order struct {
 
 // Constructor Function
 // NewOrder creates a new instance of the Order entity.
-func NewOrder(orderID string, investor *Investor, asset *Asset, shares int, price float64, orderType) {
+func NewOrder(orderID string, investor *Investor, asset *Asset, shares int, price float64, orderType string) *Order {
 	return &Order{
 		ID: 			orderID,
 		Investor: 		investor,
@@ -25,6 +25,6 @@ func NewOrder(orderID string, investor *Investor, asset *Asset, shares int, pric
 		Price: 			price,
 		OrderType: 		orderType,
 		Status:         "OPEN",
-		Transaction: 	[]*Transaction{},
+		Transactions: 	[]*Transaction{},
 	}
 }

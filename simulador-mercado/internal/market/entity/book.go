@@ -5,142 +5,134 @@ import (
 	"sync"
 )
 
-// Book respresents an order book for trading
+// Book represents a trading book that manages buy and sell orders and executes transactions
 type Book struct {
-	Order				[]*Order 		// List of orders in the book
-	Transactions		[]*Transaction	// List of transaction in the book
-	OrdersChan			chan *Order 	// Input - Orders sent by Kafka
-	OrdersChanOut		chan *Order		// Output - Orders processed and sent to Kafka
-	Wg					*sync.WaitGroup // Synchronization primitive. Coordinate the orders execution
+	Order         []*Order			// List of all orders in the book
+	Transactions  []*Transaction	// List of completed transactions
+	OrdersChan    chan *Order 		// Input channel for receiving new orders
+	OrdersChanOut chan *Order		// Output channel for sending processed ordes
+	Wg            *sync.WaitGroup	// WaitGroup for managing concurrent processing
 }
 
-// NewBook creates a new instance of the Book
+// NewBook creates a new Book instance with the given order channels and WaitGroup
 func NewBook(orderChan chan *Order, orderChanOut chan *Order, wg *sync.WaitGroup) *Book {
 	return &Book{
-		Order:         	[]*Order{},
-		Transactions:   []*Transaction{},
-		OrdersChan:     orderChan,
-		OrdersChanOut:  orderChanOut,
-		Wg:             wg,
+		Order:         []*Order{},
+		Transactions:  []*Transaction{},
+		OrdersChan:    orderChan,
+		OrdersChanOut: orderChanOut,
+		Wg:            wg,
 	}
 }
 
-// Trade processess incoming orders and execute trades
-func (b *Book)  Trade() {
-	buyOrders := NewOrderQueue() // Create buy orders queue
-	sellOrders := NewOrderQueue() // Create sell orders queue
+// Trade procesess incoming orders and executes trades based on matching logic
+func (b *Book) Trade() {
 
-	heap.Init(buyOrders) // Initialize the heap sorting algo on the buy queue
-	heap.Init(sellOrders) // Initialize the heap sorting algo on the sell queue
-	
-	// Loop checking if there is any new order on the Orders Channel
+	// Create queues for buy and sell orders for each asses
+	buyOrders := make(map[string]*OrderQueue)
+	sellOrders := make(map[string]*OrderQueue)
+	// buyOrders := NewOrderQueue()
+	// sellOrders := NewOrderQueue()
+
+	// heap.Init(buyOrders)
+	// heap.Init(sellOrders)
+
 	for order := range b.OrdersChan {
-		
-		// Check order type
+		asset := order.Asset.ID
+
+		// Initialize order queues for the asset if not already created
+		if buyOrders[asset] == nil {
+			buyOrders[asset] = NewOrderQueue()
+			heap.Init(buyOrders[asset])
+		}
+		if sellOrders[asset] == nil {
+			sellOrders[asset] = NewOrderQueue()
+			heap.Init(sellOrders[asset])
+		}
+
+		// Process BUY and SELL ordes separately
 		if order.OrderType == "BUY" {
 			
-			// Add order to the buy queue
-			buyOrders.Push(order)
+			// Add the buy order to the queue
+			buyOrders[asset].Push(order)
 
-			// Check if there is an order on the sell queue with a price that matches the buy order
-			if sellOrders.Len() > 0 && sellOrders.Orders[0].Price <= order.Price {
-				
-				// Remove the sell orderd from the queue
-				sellOrder := sellOrders.Orders.Pop().(*Order)
+			// Check for potential matches with texisting SELL orders
+			if sellOrders[asset].Len() > 0 && sellOrders[asset].Orders[0].Price <= order.Price {
+				sellOrder := sellOrders[asset].Pop().(*Order)
 
-				// Check if the sell order matched still have pending shares to sell
+				// Check if the matched SELL order have pending shares
 				if sellOrder.PendingShares > 0 {
-					
-					// Creates a new transaction with the sell order information
+					// Create a transaction and update orders and book
 					transaction := NewTransaction(sellOrder, order, order.Shares, sellOrder.Price)
-					
-					// Add the transaction to the book's transaction list
 					b.AddTransaction(transaction, b.Wg)
-					
-					// Append the transaction to the sell order's transactions list
+
+					// Update orders and send them to the output channel
 					sellOrder.Transactions = append(sellOrder.Transactions, transaction)
-					
-					// Append the transaction to the buy order's transactions list
 					order.Transactions = append(order.Transactions, transaction)
-					
-					// Send the order information exit channel to be sent to Kafka
 					b.OrdersChanOut <- sellOrder
 					b.OrdersChanOut <- order
-					
-					// If there is still shares remaining on the sell order, sent the order back to the queue
+
+					// If there are pending shares on the SELL order, add it back to the queue
 					if sellOrder.PendingShares > 0 {
-						sellOrders.Push(sellOrder)
+						sellOrders[asset].Push(sellOrder)
 					}
 				}
 			}
 		} else if order.OrderType == "SELL" {
-			// Add sell order to the sell queue
-			sellOrders.Push(order)
+			// Process SELL order. Add the order to the sell queue
+			sellOrders[asset].Push(order)
 
-			// Check if there is a buy order on the buy queue with a price that matches the sell order
-			for buyOrders.Len() > 0 && buyOrders.Orders[0].Price >= order.Price {
-				// Remove the buy order from the queue
-				buyOrder := buyOrders.Orders.Pop().(*Order)
-		
-				// Check if the buy order matched still has pending shares to buy
+			// Check for potential matches with existing BUY orders
+			if buyOrders[asset].Len() > 0 && buyOrders[asset].Orders[0].Price >= order.Price {
+				buyOrder := buyOrders[asset].Pop().(*Order)
+
+				// Check if the matched BUY order have pending shares
 				if buyOrder.PendingShares > 0 {
-					// Creates a new transaction with the buy order information
+					// Create a transaction and update orders and book
 					transaction := NewTransaction(order, buyOrder, order.Shares, buyOrder.Price)
-		
-					// Add the transaction to the book's transaction list
 					b.AddTransaction(transaction, b.Wg)
-		
-					// Append the transaction to the buy order's transactions list
+
+					// Update orders and send them to the output channel
 					buyOrder.Transactions = append(buyOrder.Transactions, transaction)
-		
-					// Append the transaction to the sell order's transactions list
 					order.Transactions = append(order.Transactions, transaction)
-		
-					// Send the order information exit channel to be sent to Kafka
 					b.OrdersChanOut <- buyOrder
 					b.OrdersChanOut <- order
-		
-					// If there is still shares remaining on the buy order, send the order back to the queue
-					if buyOrder.PendingShares > 0 {
-						buyOrders.Push(buyOrder)
-					}
-		}
 
+					// If there are pending shares on the BUY order, add it back to the queue
+					if buyOrder.PendingShares > 0 {
+						buyOrders[asset].Push(buyOrder)
+					}
+				}
+			}
+		}
 	}
 }
 
-// AddTransaction updates the book's state based on a completed transaction.
+// AddTransaction adds a completed transactio to the book, updating investor asset position and order status
 func (b *Book) AddTransaction(transaction *Transaction, wg *sync.WaitGroup) {
 	defer wg.Done()
 
-	// Extract pending shares from both the selling and buying orders
+	// Pull the current pending shares
 	sellingShares := transaction.SellingOrder.PendingShares
 	buyingShares := transaction.BuyingOrder.PendingShares
 
-	// Determine the minimum shares to process in the transaction
+	// Determine the minimum shares that can be transacted
 	minShares := sellingShares
 	if buyingShares < minShares {
 		minShares = buyingShares
 	}
 
-	// Update asset positions and pending shares for the selling and buying orders
+	// Update investor asset positions and order status
 	transaction.SellingOrder.Investor.UpdateAssetPosition(transaction.SellingOrder.Asset.ID, -minShares)
-	transaction.SellingOrder.PendingShares -= minShares
+	transaction.AddSellOrderPendingShares(-minShares)
+
 	transaction.BuyingOrder.Investor.UpdateAssetPosition(transaction.BuyingOrder.Asset.ID, minShares)
-	transaction.BuyingOrder.PendingShares -= minShares
-	
-	// Calculate and set the total amount for the transaction
-	transaction.Total = float64(transaction.Shares) * transaction.BuyingOrder.Price
-	// transaction.CalculateTotal(transaction.Shares, transaction.BuyingOrder.Price)
+	transaction.AddBuyOrderPendingShares(-minShares)
 
-	// Check if the orders are fully executed and update its status
-	// transaction.CloseBuyTransaction()
-	// transaction.CloseSellTransaction()
-	if transaction.BuyingOrder.PendingShares == 0{
-		transaction.BuyingOrder.Status = "CLOSED"
-	}
-	if transaction.SellingOrder.PendingShares == 0{
-		transaction.SellingOrder.Status = "CLOSED"
-	}
+	transaction.CalculateTotal(transaction.Shares, transaction.BuyingOrder.Price)
+	transaction.CloseBuyOrder()
+	transaction.CloseSellOrder()
 
+	// Add the transaction to the book
+	b.Transactions = append(b.Transactions, transaction)
 }
