@@ -1,5 +1,20 @@
 version: '3'
 services:
+  simulador-mercado:
+    build:
+      context: .
+      dockerfile: godev.Dockerfile
+      args:
+        USER_NAME: ${USER_NAME}
+        USER_ID: ${USER_ID}
+        GROUP_ID: ${GROUP_ID}
+    container_name: dev
+    extra_hosts:
+      - "kubernetes.docker.internal:127.0.0.1"
+      - "host.docker.internal:127.0.0.1"
+    volumes:
+      - .:/home/${USER_NAME}/code_env
+
   zookeeper:
     image: confluentinc/cp-zookeeper:latest
     environment:
@@ -19,6 +34,7 @@ services:
       KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
       KAFKA_LISTENERS: INTERNAL://:9092,OUTSIDE://:9094
       KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://host.docker.internal:9094
+      # KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka:9092,OUTSIDE://172.22.0.3:9094
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,OUTSIDE:PLAINTEXT
     # extra_hosts:
     #   - "host.docker.internal:172.17.0.1"

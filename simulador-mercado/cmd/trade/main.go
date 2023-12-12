@@ -24,7 +24,11 @@ func main() {
 	// Kafka configuration
 	configMap := &ckafka.ConfigMap{
 		// the file /etc/hosts must have `127.0.0.1 kubernetes.docker.internal host.docker.internal`
-		"bootstrap.servers": 	"host.docker.internal:9094",
+		// To access kafka from ouside the containers, use the port 9094
+		// To access kafka from other containers on the same network, use the port 9092
+
+		// "bootstrap.servers": 	"host.docker.internal:9094",
+		"bootstrap.servers": "kafka:9092"
 		"group.id":				"myGroup",
 		"auto.offset.reset":	"latest",
 	}
