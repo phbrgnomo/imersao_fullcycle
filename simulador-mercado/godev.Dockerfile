@@ -1,5 +1,5 @@
 # Build the image
-FROM golang:latest
+FROM golang:1.22.5
 
 # Upgrade existing packages, Install additional packages, and clean cache 
 RUN apt-get update && \
